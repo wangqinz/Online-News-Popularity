@@ -1,0 +1,25 @@
+load-data	data	news.train
+unnamed-chunk-2	
+unnamed-chunk-3	Explanation	Group
+unnamed-chunk-4	data
+unnamed-chunk-5	data	data_by_day	figure1
+unnamed-chunk-6	data_by_channel	figure2
+unnamed-chunk-7	
+unnamed-chunk-8	
+unnamed-chunk-9	cor_high	data	names	table_cor
+unnamed-chunk-10	addback	data
+unnamed-chunk-11	data
+unnamed-chunk-12	Boruta_data
+unnamed-chunk-13	feature_select
+unnamed-chunk-14	data2	X	y
+formula	data	feature	formula	formula_factor	formula_gam	i	list_gam	names	not_continuous
+unnamed-chunk-15	data
+unnamed-chunk-16	data_valid	dataSub	dataVld	gam.mod	gam.pred	gam.result	i	j	kfold	logi.mod	logi.pred	logi.result	nb.result	rf.mod	rf.pred	rf.result	splitFactor	splitIndex	svm.mod	svm.pred	svm.result	trainData	tree.mod	tree.pred	tree.result	validData
+unnamed-chunk-17	dataVld	err.gam	err.logi	err.rf	err.svm	err.tree	Error_rate	Methods	table	.project_cache/html/unnamed-chunk-17_f4adb131ad3cfb969e0e33b1476cba62_meta
+unnamed-chunk-18	binary_calibration_plot	mod_gam	mod_logi	mod_rf	mod_svm	mod_tree
+unnamed-chunk-19	final_model
+unnamed-chunk-20	error_one	error_zero	table_logi	.project_cache/html/unnamed-chunk-20_b99db105d95829ff1f0f41af50e4e18b_meta
+unnamed-chunk-21	
+borrow functions	bootstrap	bootstrap.ci	equitails	rboot	resample	resample.data.frame
+create a table	bootdata.lm.ci	fit.bootdata.glm	resample.bootdata	table
+predict-function	popularity_predict

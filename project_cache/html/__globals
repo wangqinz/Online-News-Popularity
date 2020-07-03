@@ -1,0 +1,25 @@
+load-data	load	news.train
+unnamed-chunk-2	data	dim	is.na	sum
+unnamed-chunk-3	c
+unnamed-chunk-4	[<-	<	$	$<-
+unnamed-chunk-5	%>%	==	$	$<-	aes	c	colnames<-	coord_flip	Days	dofw	geom_col	ggplot	ggtitle	group_by	ifelse	n	popular	Popular_Ratio	sum	summarize
+unnamed-chunk-6	%>%	aes	c	channel	Channel	colnames<-	coord_flip	data	geom_col	ggplot	ggtitle	group_by	n	popular	Popular_Ratio	sum	summarize
+unnamed-chunk-7	figure1	figure2	grid.arrange
+unnamed-chunk-8	c	data	ggpairs
+unnamed-chunk-9	colnames	cor	findCorrelation	set.seed	which
+unnamed-chunk-10	$	c	cbind	colnames	data.frame	scale	which
+unnamed-chunk-11	==	$	$<-	c	ifelse	names	which
+unnamed-chunk-12	~	Boruta	data
+unnamed-chunk-13	[[	Boruta_data	getSelectedAttributes	list	plot
+unnamed-chunk-14	~	$	data	model.matrix
+formula	==	$	$<-	as.character	as.formula	c	colnames	feature_select	for	if	ifelse	length	paste0	which
+unnamed-chunk-15	$	c	data.frame	set.seed	X
+unnamed-chunk-16	!=	[[	>	as.character	c	data	factor	for	formula	formula_factor	formula_gam	gam	glm	if	ifelse	nrow	order	predict	randomForest	rbind	sample	set.seed	split	svm	tree
+unnamed-chunk-17	!=	%>%	$	$<-	c	cbind	colnames<-	format	gam.result	kable	kable_styling	logi.result	mean	paste0	rf.result	round	svm.result	tree.result
+unnamed-chunk-18	$	aes	cut	data.frame	dataVld	formula	formula_factor	formula_gam	gam	geom_abline	geom_errorbar	geom_point	geom_rug	ggplot	glm	mean	predict	randomForest	return	sqrt	svm	table	tapply	tree	xlab	xlim	ylab	ylim
+unnamed-chunk-19	~	data	glm
+unnamed-chunk-20	%>%	$	c	dataVld	kable	kable_styling	table
+unnamed-chunk-21	c	final_model	par	plot
+borrow functions	!	apply	array	c	cbind	dim	if	is.null	ncol	nrow	quantile	replicate	return	sample	stopifnot	t
+create a table	~	binomial	bootstrap.ci	c	cbind	coef	coefficients	colnames<-	data	final_model	glm	resample.data.frame	return	round	set.seed
+predict-function	==	>	$	$<-	c	cbind	colnames	data.frame	diag	final_model	ifelse	na.omit	news.train	paste0	predict	print	round	save	scale	sum	table	which
