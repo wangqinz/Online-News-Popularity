@@ -1,0 +1,582 @@
+---
+title: "Online News Popularity Proj."
+author: "Qinzhe Wang"
+output: html_document
+
+---
+
+```{r, include=FALSE}
+# General set-up for the report:
+# Don't print out code
+# Save results so that code blocks aren't re-run unless code
+# changes (cache), _or_ a relevant earlier code block changed (autodep),
+# don't clutter R output with messages or warnings (message, warning)
+library(e1071)
+library(MASS)
+library(knitr)
+library(tidyverse)
+library(tree)
+library(maptree)
+library(randomForest)
+library(mgcv)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(mlbench)
+library(caret)
+library(GGally)
+library(glmnet)
+library(class)
+library(corrgram)
+library(car)
+library(Boruta)
+
+
+opts_chunk$set(echo=FALSE,
+               cache=TRUE, autodep=TRUE,
+               message=FALSE, warning=FALSE)
+# Turn off meaningless clutter in summary() output
+options(show.signif.stars=FALSE)
+```
+
+### Introduction
+
+Last two decades have witnessed the development of technology. With the spread of the Internet, reading habit have changed: more and more people are willing to read articles online. Journalism is one of the industries that are significantly influenced by the technology. There are lots of news websites online, including different types of news. A case in point is Mashable, a global, multi-platform online news website. In this project, my main focus is to help authors from Mashable to determine whether their new articles will be popular or not. To be more specific, almost all authors want their articles to be tagged as "hot" or "popular". And I am going to create a classifier to predict popularity by analyzing and finding several most significant predictors so that those authors are able to increase the likelihood of popularity before publishing.
+
+
+### Exploratory data analysis
+
+```{r load-data,}
+load('news.Rdata')
+data<-news.train
+```
+
+```{r, include=F}
+#View(data)
+dim(data)
+sum(is.na(data)) #no missing value
+#names(data)
+```
+
+
+```{r}
+Group<-c("Url","Timedelta","Words","Links","Digital Media","Keywords","Published Time","Natural Language Processing","Popularity")
+
+Explanation<-c("The link of the article from Mashable","Days from the time that the article be published to the time that the article be acquired", "The word information of the article, including number or words in the tittle, number of words in the content, etc.","The link information of the ariticle, including number of links, shares of referenced article, etc.","Number of images and videos in the article.","The information about keywords in the article, including number of keywords, type of keywords, etc.","The day of the week the article published and whether it is published on the weekend.","The information about natural language in the article, including subjectivity, sentiment polarity, etc.","Whether the article is popular or not (dependent variable)")
+
+#kable(table<-cbind(Group,Explanation),'html') %>%
+#   kable_styling(bootstrap_options=c("striped", "hover"),full_width = F)
+```
+
+The given dataset is provided by Fernandes, Vinagre and Cortez, the researchers who work in a Proactive Intelligent Decision Support System. The given data file has 6000 observations without missing values, containing all articles published from 2013 to 2015 from Mashable. And there are 50 columns in the dataset, including one target variable.
+
+```{r}
+
+data$popular[data$n_tokens_content <50] <- "no"
+data$popular[data$n_tokens_title<6]<-"no"
+data$popular[data$timedelta<13]<-"no"
+
+```
+
+Among all 6000 observations, there are some articles whose lengths are extremely short. These kinds of articles are unlikely to be shared among readers at large because readers will not have comfortable reading experience. And whether the News is popular is highly correlated to the days that the article was published. There is no denying that the click rate and the share times increase as the number of days increased. Based on the dataset, we can tag those kinds of News (more specifically, the articles whose length of article is fewer than 50 or whose length of the title is fewer than 6 or the days between publication and acquisition fewer than 13) as "unpopular" before we do further exploration.
+
+```{r}
+data$popular<-ifelse(data$popular=="yes",1,0)
+
+
+data_by_day<-data%>%
+  group_by(dofw)%>%
+  summarize(ratio=sum(popular)/n())
+
+colnames(data_by_day)<-c("Days","Popular_Ratio" )
+
+
+figure1<-ggplot(data_by_day,aes(Days,Popular_Ratio))+geom_col(width=1,fill="lightblue",col="black")+ggtitle("The Influence of Days")
+figure1<-figure1+coord_flip() # group names are overlapped, so rotate the plot
+
+```
+
+```{r}
+data_by_channel<-data%>%
+  group_by(channel)%>%
+  summarize(ratio=sum(popular)/n())
+
+colnames(data_by_channel)<-c("Channel","Popular_Ratio" )
+
+figure2<-ggplot(data_by_channel,aes(Channel,Popular_Ratio))+geom_col(width=1,fill="lightblue",col="black")+ggtitle("The Influence of Channels")
+figure2<-figure2+coord_flip() # group names are overlapped, so rotate the plot
+```
+
+<div style= "float:left;position: relative; top: 0px; right: 15px;">
+
+```{r,fig.height = 3,fig.width = 7}
+grid.arrange(figure1,figure2,ncol=2)
+
+```
+
+</div>
+The left figure shows the influence of days to the popular probability. First, it can be easily observed that the if the News is published on weekend, on average, the ratio of popularity is higher compared to the ratio for weekday-News, indicating that a weekend News is more likely to be shared among the audience. Then the News that is published on Thursday has the smallest popularity ratio. The right plot is the popular ratio across the `channel` feature. Ceteris paribus, the articles in `other` sort have the largest shares, followed by the News in channel `socmed` and `lifestyle`. It seems that readers are not willing to read world News because compared to the others, articles under the `world` field are less likely to be popular. As there are lots of features contained in the data, we need to check whether some of them are highly correlated. Take predictors that correlated to words categorizing (`rate_positive_words`, `rate_negative_words`, `global_rate_positive_words` and `global_rate_negative_words`) as an example:
+
+<div style= "float:right;position: relative; top: 0px; left: 15px;">
+
+```{r,fig.height = 3, fig.width = 6}
+ggpairs(data[,c("rate_positive_words", "rate_negative_words","global_rate_positive_words","global_rate_negative_words")])
+```
+
+</div>
+
+Above figure is the pairs plot for those four features. It is easy to find the limitation and multicollinearity between those four predictors. On the one hand, there are clear patterns showing linear relationships among those four predictors. On the other hand, there are some limitations shown in the first plot in the second row: the sum of `rate_positive_words`, `rate_negative_words` equals to 1, which means that the once we know one of them, we can calculate the value of the other one. The multicollinearity indicates to remove highly correlated predictors as well as to perform features selection process to obtain a suitable subset of data instead of using all the variables.
+
+```{r}
+set.seed(1)
+table_cor <- cor(data[2:47])
+cor_high <- findCorrelation(table_cor, cutoff=0.5)
+names<-colnames(data[2:47][cor_high])
+data<-data[,-which(colnames(data) %in% names)]
+```
+
+
+```{r}
+
+#remove predictors that are not continous first
+addback<-cbind(timedelta=data$timedelta,popular=data$popular,dofw=data$dofw,channel=data$channel,n_non_stop_words=data$n_non_stop_words,is_weekend=data$is_weekend)
+  
+data<-data[,-which(colnames(data) %in% c("url","timedelta","popular","dofw","channel","n_non_stop_words","is_weekend"))]
+
+#standardize all continuous predictors
+data<-scale(data)
+
+#add back those removed predictors except url because it is not predictable
+
+data<-data.frame(cbind(data,addback))
+
+#data$log_n_tokens_content<-log((data$n_tokens_content)+1)
+#data$log_num_hrefs<-log((data$num_hrefs)+1)
+#data$log_num_self_hrefs<-log((data$num_self_hrefs)+1)
+#data$log_num_imgs<-log((data$num_imgs)+1)
+#data$log_num_videos<-log((data$num_videos)+1)
+#data$log_LDA_00<-log((data$LDA_00)+1)
+#data$log_LDA_01<-log((data$LDA_01)+1)
+#data$log_LDA_02<-log((data$LDA_02)+1)
+#data$log_LDA_03<-log((data$LDA_03)+1)
+#data$log_LDA_04<-log((data$LDA_04)+1)
+#data$log_abs_title_sentiment_polarity<-log((data$abs_title_sentiment_polarity)+1)
+
+#data<-data[,-which(names(data) %in% c("n_tokens_conten","num_hrefs","num_self_hrefs","num_imgs","num_videos","LDA_00","LDA_01","LDA_02","LDA_03","LDA_04","abs_title_sentiment_polarity"))]
+```
+
+Before selecting appropriate features, some modifications are needed. First, the correlation values that are larger than 0.5 are highly-correlated and need to be removed. Then, some continuous variables in the raw dataset do not follow normal distributions. That may affect not only the normality and the homoscedasticity of the residuals, but also some parametric tests. Therefore, I use `scale` function to standardize all continuous variables in the dataset so that all of them have normal distributions now. Also, there are two categorical predictors in the dataset. Since some categories have significant differences in the ratio of popularity compared to others, it is better to split categorical variables into several columns (one category per column) and makes them as binary variables then we are able to add single category into our model.
+
+```{r}
+data$dofwmonday<-ifelse(data$dofw=="monday",1,0)
+data$dofwtuesday<-ifelse(data$dofw=="tuesday",1,0)
+data$dofwwednesday<-ifelse(data$dofw=="wednesday",1,0)
+data$dofwthursday<-ifelse(data$dofw=="thursday",1,0)
+data$dofwfriday<-ifelse(data$dofw=="friday",1,0)
+data$dofwsaturday<-ifelse(data$dofw=="saturday",1,0)
+data$dofwsunday<-ifelse(data$dofw=="sunday",1,0)
+
+#unique(data$channel)
+data$channelentertainment<-ifelse(data$channel=="entertainment",1,0)
+data$channelworld<-ifelse(data$channel=="world",1,0)
+data$channelother<-ifelse(data$channel=="other",1,0)
+data$channelbus<-ifelse(data$channel=="bus",1,0)
+data$channeltech<-ifelse(data$channel=="tech",1,0)
+data$channelsocmed<-ifelse(data$channel=="socmed",1,0)
+data$channellifestyle<-ifelse(data$channel=="lifestyle",1,0)
+
+data<-data[,-which(names(data) %in% c("dofw","channel"))]
+
+```
+
+
+```{r,echo=F,results='hide',warning=F}
+Boruta_data <- Boruta(popular ~ ., data = data, doTrace = 2, ntree = 500)
+#names(Boruta_data)
+```
+
+<div style= "float:left;position: relative; top: -10px; right: 15px">
+
+```{r,fig.height = 4, fig.width = 5.5}
+feature_select<-list(getSelectedAttributes(Boruta_data))[[1]]
+plot(Boruta_data,xaxs="i",yaxs="i")
+```
+
+
+
+
+```{r,fig.height = 3, fig.width = 5}
+data2<-data
+X<-model.matrix(~.-popular,data=data2)
+y<-data2$popular
+
+```
+
+</div>
+
+Feature selection is the process of selecting a subset of relevant features (variables, predictors) for use in model construction ([Wikipedia](https://en.wikipedia.org/wiki/Feature_selection)). In this case, we apply Boruta to the dataset after removing highly correlated predictors to find all relevant variables. Boruta is the feature selection wrapper algorithm that works for classification method of high-dimentional datasets with random forest. It compares the importance of attributes with importance achievable and chooses significant attributes, removing the features that are less relevant than random probes.The left figure is the importance plot performed by Boruta: the x-axis shows the names of all attributes (the order of the attributes are based on the level of significance: from the lowest to the highest) while the y-axis shows the importance level. The plot shows the importance level for each feature with its confidence interval. The color of the error bar is the standard of significance. Those features whose confidence interval are filled with color green are highly related to the dependent variable `popular` and will be included in the models.
+
+### Initial modeling
+
+```{r formula}
+#formula 
+
+data$popular_factor<-ifelse(data$popular==1,as.character(1),as.character(0))
+
+formula<-as.formula(paste0("popular~",paste0(feature_select,collapse="+")))
+formula_factor<-as.formula(paste0("popular_factor~",paste0(feature_select,collapse="+")))   
+
+#formula for gam
+
+# check continuous variable
+#for (i in 1:ncol(data)){ print(ggplot(data,aes(x=data[,i],y=popular))+geom_point()+ggtitle(colnames(data[i]))) }
+
+not_continuous<-c("url","n_non_stop_words","number_keywords","kw_avg_min","is_weekend","channel","dofw")
+
+
+names<-colnames(data[,-which(colnames(data) %in% c(not_continuous,"popular","popular_factor"))]) # column names for continuous predictor
+
+
+list_gam<-c()
+for (i in 1:length(feature_select)){
+  
+  if (feature_select[i] %in% names){
+    feature<-paste0("c(",feature_select[i],")",collapse="")
+    list_gam<-c(list_gam,feature)
+  } else{
+    list_gam<-c(list_gam,feature_select[i])
+  }
+}
+
+formula_gam<-as.formula(paste0("popular~",paste0(list_gam,collapse="+")))    
+
+
+```
+
+
+#### _Logistic regression_
+
+Logistic regression is a regression that where the dependent variable is categorical. It allows to model a nonlinear association in a linear way: $log\left( \frac {p(X)}{1-p(X)} \right) = \beta_{0} + \beta_{1}X_{1} + ... + \beta_{p}X_{p}$. In this case, the outcome is binary from predictor variables that are both continuous and categorical. Since the categorical outcome violates the assumption of linearity in normal regression, logistic regression is one of the choices here.
+
+#### _Generalized additive model (GAM)_
+
+Generalized additive model is a generalized linear model in which the linear predictor depends linearly on unknown smooth functions of some predictor ([Wikipedia](https://en.wikipedia.org/wiki/Generalized_additive_model)). $log\left( \frac {p(X)}{1-p(X)} \right) = \beta_{0} + f(x_{1}) + f(x_{2})... + f(x_{p})$. Compared to logistic regression, GAM has higher prediction quality because it predicts the dependent variable by using unspecific functions of predictors. Also, generalized additive model is able choose various distributions of predictor variables, which can be regarded as another advantage for GAM.
+
+#### _Decision tree_
+
+Decision tree is a non-parametric supervised learning method for classification, using a tree-like graph. Compared to other methods, a tree can be visualized, which means it is easier to understand and interpret. And a tree is able to handle continuous and categorical data at the same time. However, overfitting is the issue in prediction. Decision tree may be too complex to generalize the data.
+
+#### _Random forest_
+
+Random forest is a machine learning algorithm that operates numbers of decision trees in the training data and gives a more accurate prediction. It is one of the most used methods because the process is easy and it can be used for both classification and regression.
+
+#### _Support vector machine (SVM)_
+
+Support vector machine is a type of supervised learning algorithm that is defined by a separating hyperplane in classification field. With labeled training data, it provides a non-probabilistic binary linear classifier as well as an optimal hyperplane that categorizes new example. One of the advantages of SVM is that it can provide a unique global optimum cut-off rule.
+
+Among all the models, there are basic models such as logistic and GAM: simple but might be efficient; models like decision tree and random forest do not require the data types too much so that they might be more appropriate; also method like SVM is a much more advanced model. Before doing some comparison, I perfer to use SVM since it usually gives the most accurate prediction if there is no error in the raw dataset because SVM provides an optimal cut-off hyperplane.
+
+### Model comparison and final model
+
+```{r}
+set.seed(2)
+data<-data.frame(X[,-c(1,60)],popular=data$popular,popular_factor=data$popular_factor) # X[,-1] because of the column of intercep
+```
+
+```{r}
+logi.result<-c()
+gam.result<-c()
+tree.result<-c()
+rf.result<-c()
+svm.result<-c()
+nb.result<-c()
+
+
+data_valid<-c()
+
+set.seed(1)
+kfold <- 10
+dataVld <- data[sample(1:nrow(data)), ]
+splitIndex <- c(1:nrow(data)) %% kfold
+splitFactor <- factor(splitIndex[order(splitIndex)])
+dataSub <- split(dataVld,splitFactor)
+
+
+for(i in 1:kfold) {
+  trainData <-   validData <- c()
+  for(j in 1:kfold) {
+    if(j!= i){
+      trainData <- rbind(trainData,dataSub[[j]])
+    }   else {
+      validData <- dataSub[[j]]
+    }
+  }
+  
+  #build models
+  logi.mod <- glm(formula, data=trainData, family = "binomial")
+  gam.mod <- gam(formula_gam, data=trainData, family = "binomial")
+  tree.mod <- tree(formula_factor, data=trainData)
+  rf.mod <- randomForest(formula_factor, data=trainData,ntree=500)
+  svm.mod <- svm(formula_factor, data=trainData)
+
+  
+  #predictions of models
+  logi.pred <- ifelse(predict(logi.mod, validData, type="response") > 0.5,1,0)
+  gam.pred <- ifelse(predict(gam.mod, validData, type="response") > 0.5,1,0)
+  tree.pred <- predict(tree.mod, newdata=validData,type="class")
+  rf.pred <- predict(rf.mod, newdata=validData)
+  svm.pred  <- predict(svm.mod, validData, type = "class")
+
+
+
+  #save results
+  logi.result <- c(logi.result, logi.pred)
+  gam.result <- c(gam.result, gam.pred)
+  tree.result <- c(tree.result, as.character(tree.pred))
+  rf.result <- c(rf.result, as.character(rf.pred))
+  svm.result <- c(svm.result, as.character(svm.pred))
+
+
+}
+
+```
+
+<div style= "float:left;position: relative; top: 0px; right: 10px;">
+
+```{r,fig.height = 3,fig.width = 6}
+#combine results into data frame
+dataVld$logistic <- logi.result
+dataVld$gam <-  gam.result
+dataVld$tree <-  tree.result
+dataVld$randomforest <- rf.result
+dataVld$svm <-  svm.result
+
+err.logi <-  mean(dataVld$logistic != dataVld$popular)
+err.gam <- mean(dataVld$gam  != dataVld$popular)
+err.tree <- mean(dataVld$tree != dataVld$popular)
+err.rf <-  mean(dataVld$randomforest != dataVld$popular)
+err.svm <- mean(dataVld$svm  != dataVld$popular)
+
+Methods<-c("Logistic regression","Generalized additive model","Decision tree","Random forest","Support vector machine")
+
+Error_rate<-c(paste0(round(err.logi,4)*100,"%",collapse=""),paste0(round(err.gam,4)*100,"%",collapse=""),paste0(round(err.tree,4)*100,"%",collapse=""),paste0(round(err.rf,4)*100,"%",collapse=""),paste0(format(round(err.svm,4)*100,nsmall=2),"%",collapse=""))
+
+table<-cbind(Methods,Error_rate)
+colnames(table)<-c("Methods","Testing error rate")
+kable(table,"html") %>%
+  kable_styling(bootstrap_options=c("striped", "hover"))
+```
+
+</div>
+
+To compare the performance of the models, I use a 10-fold cross validation approach, comparing the average misclassification error rates on the randomly selected 10 folds for all five models. 
+
+The table on the left shows the lowest misclassification error rate is from decision tree (`r table[3,2]`), followed by the method support vector machine (`r table[5,2]`). The GAM has the highest error rate in this case (`r table[2,2]`). Actually, all the five models show very close misclassification error rates (the largest difference in error rate is `r (err.gam-err.tree)*100`%), meaning that the performances of the prediction using 10-folds cross-validation are nearly the same. However, if we draw the calibration plots, almost all models underestimate the popularity, which means that those models are not quite good in predicting. Taking considering of not only the accuracy and the patterns in calibration plots, but also the interpretation ability, I choose the logistic regression as the final model.
+
+<div style= "float:left;position: relative; top: 0px; right: 10px;">
+
+```{r,fig.height = 3,fig.width = 6}
+
+binary_calibration_plot <- function(y, model, breaks = 0:10/10, 
+                                    point.color='blue', line.color='red') {
+  fitted.probs = predict(model, type="response")
+  ind = cut(fitted.probs, breaks)
+  freq = tapply(y, ind, mean)
+  ave.prob = tapply(fitted.probs, ind, mean)
+  se = sqrt(ave.prob*(1-ave.prob)/table(ind))
+  df = data.frame(freq, ave.prob, se)
+  g <- ggplot(df, aes(ave.prob,freq)) + geom_point(color=point.color) + 
+    geom_abline(slope = 1, intercept = 0,color=line.color) +
+    ylab("observed frequency") + xlab("average predicted probability") +
+    geom_errorbar(ymin=ave.prob-1.96*se, ymax=ave.prob+1.96*se) +
+    ylim(0,1)+xlim(0,1) + 
+    geom_rug(aes(x=fitted.probs,y=fitted.probs),data.frame(fitted.probs),sides='b')
+  return(g)  
+}
+
+mod_logi<-glm(formula,data=dataVld,family="binomial")
+
+mod_gam<-gam(formula_gam,data=dataVld,family="binomial")
+
+mod_tree<-tree(formula_factor,data=dataVld)
+
+mod_rf<-randomForest(formula_factor,data=dataVld,ntree=400)
+
+mod_svm<-svm(formula_factor,data=dataVld)
+
+
+
+binary_calibration_plot(dataVld$popular,mod_logi)
+#binary_calibration_plot(dataVld$popular,mod_gam)
+#binary_calibration_plot(data$popular==1, mod_tree, breaks=0:9/10)
+
+#binary_calibration_plot(data$popular==1, mod_rf, breaks=0:9/10, 'blue', 'red')
+#binary_calibration_plot(dataVld$popular,mod_svm)
+```
+
+```{r,fig.height = 3,fig.width = 6}
+final_model<-glm(popular ~ n_tokens_content + n_unique_tokens + num_hrefs + num_self_hrefs + 
+    num_imgs + num_videos + num_keywords + kw_avg_min + kw_min_max + 
+    kw_min_avg + self_reference_max_shares + LDA_00 + LDA_01 + 
+    LDA_02 + LDA_03 + global_rate_negative_words + min_positive_polarity + 
+    max_positive_polarity + min_negative_polarity + max_negative_polarity + 
+    title_subjectivity + title_sentiment_polarity + abs_title_subjectivity + 
+    is_weekend, data=data,family="binomial")
+```
+
+```{r}
+table_logi<-table(dataVld$popular,dataVld$logi,dnn=c("reality","prediction"))
+kable(table_logi) %>%
+  kable_styling(bootstrap_options=c("striped", "hover"))
+
+
+error_zero<-table_logi[1,2]/(table_logi[1,1]+table_logi[1,2])
+error_one<-table_logi[2,1]/(table_logi[2,1]+table_logi[2,2])
+```
+
+```{r,fig.height = 3,fig.width = 6}
+par(mfrow=c(1,2))
+plot(final_model,which=1:2)
+```
+
+</div>
+
+In the calibration plot of the final model (logistic regression), first, the red line is the 45-degree line with intercept = 0. Although the way I build my model is reasonable, the prediction the model made is not perfect. First, all observed frequency points are inside the error bar (confidence interval) of my prediction probability, which is good. However, the model does not perform well when the probability is relatively high. For example, there is an obvious pattern showing underestimation when my predicted probability is in the range [0.5, 0.75]. Besides there may be some errors in the dataset, one of the reasonable explanations is that when the shares of article exceed a certain amount, whether the News is popular or not cannot be predicted by a single model. In other words, "unpopular articles are all alike; every popular article is popular in its own way." 
+
+I also make a confusion matrix for the final model. With the overall error rate `r err.logi*100`%, we predict `r table_logi[1,1]` of all `r table_logi[1,1]+ table_logi[1,2]` correctly (correct rate `r round(table_logi[1,1]/(table_logi[1,1]+ table_logi[1,2])*100,2)`%), which is quite high. However, the model incorrectly predicts almost all 0: only `r table_logi[2,2]` of all `r table_logi[2,1]+ table_logi[2,2]` are correctly predicted (`r round(error_one*100,2)`% error rate).
+
+As for the diagnostics plots on the left, due to the reason that the model under-predict a large number of 1, the mean value of residuals (residuals of the odds) is slightly larger than zero in the residual plot. In the Q-Q plot, the points in the popular group are not laid along the Q-Q line, indicating the residuals are not Gaussian. Most points that are in the unpopular group are located along the Q-Q line, which corresponds that the model predict unpopular group quite well.
+
+```{r borrow functions}
+#borrow functions from lecture 8
+resample <- function(x) {
+    sample(x, replace = TRUE)
+}
+
+resample.data.frame <- function(data) {
+    sample.rows <- resample(1:nrow(data))
+    return(data[sample.rows, ])
+}
+
+rboot <- function(statistic, simulator, B) {
+    tboots <- replicate(B, statistic(simulator()))
+    if (is.null(dim(tboots))) {
+        tboots <- array(tboots, dim = c(1, B))
+    }
+    return(tboots)
+}
+
+
+bootstrap <- function(tboots, summarizer, ...) {
+    summaries <- apply(tboots, 1, summarizer, ...)
+    return(t(summaries))
+}
+
+equitails <- function(x, alpha) {
+    lower <- quantile(x, alpha/2)
+    upper <- quantile(x, 1 - alpha/2)
+    return(c(lower, upper))
+}
+
+bootstrap.ci <- function(statistic = NULL, simulator = NULL, tboots = NULL,
+    B = if (!is.null(tboots)) {
+        ncol(tboots)
+    }, t.hat, level) {
+    if (is.null(tboots)) {
+        stopifnot(!is.null(statistic))
+        stopifnot(!is.null(simulator))
+        stopifnot(!is.null(B))
+        tboots <- rboot(statistic, simulator, B)
+    }
+    alpha <- 1 - level
+    intervals <- bootstrap(tboots, summarizer = equitails, alpha = alpha)
+    upper <- t.hat + (t.hat - intervals[, 1])
+    lower <- t.hat + (t.hat - intervals[, 2])
+    CIs <- cbind(lower = lower, upper = upper)
+    return(CIs)
+}
+```
+
+
+```{r create a table}
+set.seed(1)
+resample.bootdata<-function(){
+  resample.data.frame(data)
+}
+
+fit.bootdata.glm<-function(newdata){
+  fit<-glm(popular ~ n_tokens_content + n_unique_tokens + num_hrefs + num_self_hrefs + 
+    num_imgs + num_videos + num_keywords + kw_avg_min + kw_min_max + 
+    kw_min_avg + self_reference_max_shares + LDA_00 + LDA_01 + 
+    LDA_02 + LDA_03  + global_rate_negative_words + min_positive_polarity + 
+    max_positive_polarity + min_negative_polarity + max_negative_polarity + 
+    title_subjectivity + title_sentiment_polarity + abs_title_subjectivity + 
+    is_weekend,data=newdata,family=binomial)
+  return(coefficients(fit))
+}
+
+
+#nonparametric bootstrap (resample the rows of the data)
+bootdata.lm.ci<-bootstrap.ci(statistic=fit.bootdata.glm,simulator = resample.bootdata, t.hat=coefficients(final_model),level=0.95,B=1000)
+
+# create the table
+table<-round(cbind(coef(final_model), bootdata.lm.ci),4)
+
+colnames(table)= c("Estimate","nonparametric bootstrap 2.5%", "nonparametric bootstrap 97.5%")
+#kable(table,digits=4,"html") %>%
+#   kable_styling(bootstrap_options=c("striped", "hover"), position = "left")
+
+```
+
+Based on the coefficients of our final model as well as the 95% confidence interval after bootstrapping with repeat times = 1000, we are able to find the top three influenced factors. Among all predictors in the final model, whether the news is published on weekend plays the most significant role in predicting popularity (coefficient = `r table[25,1]` with CI: [`r table[25,2]`, `r table[25,3]`]), indicating that on average, the news that was published on weekend are more likely to be popular. The second most significant predictors is the rate of unique words in the content (coefficient = `r table[3,1]` with CI: [`r table[3,2]`, `r table[3,3]`]), meaning that the higher the rate is, readers are more willing to share the article. The third important feature is the average number of the minimum keywords in the article (coefficient = `r table[11,1]` with CI: [`r table[11,2]`, `r table[11,3]`]). Therefore, if one wants his or her article to be tagged as "popular", it is better to publish on weekend and increase the rate of unique words.
+
+
+
+
+```{r predict-function}
+popularity_predict <- function(my_fitted_model, newdata=news.train){
+ ## insert necessary data transformations here and extract prediction error
+  addback<-cbind(timedelta=newdata$timedelta,popular=newdata$popular,dofw=newdata$dofw,channel=newdata$channel,n_non_stop_words=newdata$n_non_stop_words,is_weekend=newdata$is_weekend)
+  
+  newdata<-newdata[,-which(colnames(newdata) %in% c("url","timedelta","popular","dofw","channel","n_non_stop_words","is_weekend"))]
+
+  #standardize all continuous predictors
+  newdata<-scale(newdata)
+
+  #add back those removed predictors except url because it is not predictable
+
+  newdata<-data.frame(cbind(newdata,addback))
+  
+  newdata<-na.omit(newdata)
+  newdata$dofwmonday<-ifelse(newdata$dofw=="monday",1,0)
+  newdata$dofwtuesday<-ifelse(newdata$dofw=="tuesday",1,0)
+  newdata$dofwwednesday<-ifelse(newdata$dofw=="wednesday",1,0)
+  newdata$dofwthursday<-ifelse(newdata$dofw=="thursday",1,0)
+  newdata$dofwfriday<-ifelse(newdata$dofw=="friday",1,0)
+  newdata$dofwsaturday<-ifelse(newdata$dofw=="saturday",1,0)
+  newdata$dofwsunday<-ifelse(newdata$dofw=="sunday",1,0)
+
+  newdata$channelentertainment<-ifelse(newdata$channel=="entertainment",1,0)
+  newdata$channelworld<-ifelse(newdata$channel=="world",1,0)
+  newdata$channelother<-ifelse(newdata$channel=="other",1,0)
+  newdata$channelbus<-ifelse(newdata$channel=="bus",1,0)
+  newdata$channeltech<-ifelse(newdata$channel=="tech",1,0)
+  newdata$channelsocmed<-ifelse(newdata$channel=="socmed",1,0)
+  newdata$channellifestyle<-ifelse(newdata$channel=="lifestyle",1,0)
+  
+  mod_pred<-ifelse(predict(my_fitted_model, newdata=newdata, type="response") > 0.5,1,0)
+  
+  newdata$pred <- mod_pred
+  matrix<-table(newdata$popular,newdata$pred)
+  err<-1-sum(diag(matrix)/sum(matrix))
+  print(paste0("The testing error rate is ", round(err,4), collapse = ""))
+}
+
+# popularity_predict(final_model)  
+# the function works
+
+## Be sure to test your function on the original data
+save(final_model,popularity_predict,file="final_model.Rdata")
+```
+
+
