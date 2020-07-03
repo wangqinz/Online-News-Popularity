@@ -535,15 +535,17 @@ Based on the coefficients of our final model as well as the 95% confidence inter
 
 ```{r predict-function}
 popularity_predict <- function(my_fitted_model, newdata=news.train){
- ## insert necessary data transformations here and extract prediction error
+  
+## do some cleaning
+  ### insert necessary data transformations here and extract prediction error
   addback<-cbind(timedelta=newdata$timedelta,popular=newdata$popular,dofw=newdata$dofw,channel=newdata$channel,n_non_stop_words=newdata$n_non_stop_words,is_weekend=newdata$is_weekend)
   
   newdata<-newdata[,-which(colnames(newdata) %in% c("url","timedelta","popular","dofw","channel","n_non_stop_words","is_weekend"))]
 
-  #standardize all continuous predictors
+  ### standardize all continuous predictors
   newdata<-scale(newdata)
 
-  #add back those removed predictors except url because it is not predictable
+  ### add back those removed predictors except url because it is not predictable
 
   newdata<-data.frame(cbind(newdata,addback))
   
@@ -565,7 +567,9 @@ popularity_predict <- function(my_fitted_model, newdata=news.train){
   newdata$channellifestyle<-ifelse(newdata$channel=="lifestyle",1,0)
   
   mod_pred<-ifelse(predict(my_fitted_model, newdata=newdata, type="response") > 0.5,1,0)
+
   
+## finish the model
   newdata$pred <- mod_pred
   matrix<-table(newdata$popular,newdata$pred)
   err<-1-sum(diag(matrix)/sum(matrix))
