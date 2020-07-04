@@ -4,6 +4,8 @@
 
 * The goal is to predict which news articles will be popular and which features are most useful for predicting popularity.
 
+* More: fit the model -> the entire dataset.
+
 
 
 
